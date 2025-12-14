@@ -3,6 +3,8 @@
   'use strict';
 
   let isProcessing = false;
+  let hasProcessedUrl = null;
+  let enhancedDataInjected = false;
 
   // Function to extract First Street URL from Climate risks section
   function findFirstStreetLink() {
@@ -212,13 +214,26 @@
   async function enhancePage() {
     if (isProcessing) return;
     
+    const firstStreetUrl = findFirstStreetLink();
+    
+    // Don't process if we've already processed this URL
+    if (firstStreetUrl && hasProcessedUrl === firstStreetUrl) {
+      console.log('Already processed this URL, skipping...');
+      return;
+    }
+    
+    // Don't process if data is already injected and visible
+    if (enhancedDataInjected && document.getElementById('enhanced-climate-data')) {
+      console.log('Enhanced data already visible, skipping...');
+      return;
+    }
+    
     isProcessing = true;
     console.log('Zillow Climate Risk Enhancer: Starting...');
-
-    const firstStreetUrl = findFirstStreetLink();
     
     if (firstStreetUrl) {
       console.log('Found First Street link:', firstStreetUrl);
+      hasProcessedUrl = firstStreetUrl;
       
       try {
         showLoadingIndicator();
@@ -228,6 +243,7 @@
           console.log('Climate data retrieved:', data);
           removeLoadingIndicator();
           injectClimateData(data, firstStreetUrl);
+          enhancedDataInjected = true;
         }
       } catch (error) {
         console.error('Error fetching climate data:', error);
@@ -271,16 +287,47 @@
   }
 
   // Watch for dynamic content changes (Zillow is a SPA)
+  let debounceTimer = null;
   const observer = new MutationObserver((mutations) => {
-    if (!isProcessing) {
-      const hasRelevantChanges = mutations.some(mutation => 
-        mutation.addedNodes.length > 0 || 
-        (mutation.type === 'childList' && mutation.target.querySelector('a[href*="firststreet.org"]'))
-      );
-      
-      if (hasRelevantChanges) {
-        setTimeout(enhancePage, 1500);
+    // Clear existing timer
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    
+    // Don't process if we're already processing or data is already shown
+    if (isProcessing || (enhancedDataInjected && document.getElementById('enhanced-climate-data'))) {
+      return;
+    }
+    
+    // Check if this is a significant change
+    const hasRelevantChanges = mutations.some(mutation => {
+      // Ignore our own injected elements
+      if (mutation.target.id === 'enhanced-climate-data' || 
+          mutation.target.id === 'enhanced-climate-loading') {
+        return false;
       }
+      
+      // Check if First Street link was added
+      if (mutation.addedNodes.length > 0) {
+        for (let node of mutation.addedNodes) {
+          if (node.nodeType === 1) { // Element node
+            if (node.querySelector && node.querySelector('a[href*="firststreet.org"]')) {
+              return true;
+            }
+          }
+        }
+      }
+      
+      return false;
+    });
+    
+    if (hasRelevantChanges) {
+      // Reset state when navigating to a new property
+      hasProcessedUrl = null;
+      enhancedDataInjected = false;
+      
+      // Debounce - wait for page to settle
+      debounceTimer = setTimeout(enhancePage, 2000);
     }
   });
 
